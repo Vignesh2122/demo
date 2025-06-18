@@ -14,8 +14,6 @@ on:
 
 env:
   AWS_REGION: ap-south-1
-  ECR_REGISTRY: 674845781849.dkr.ecr.ap-south-1.amazonaws.com
-  ECR_REPOSITORY: demo
 
 jobs:
   build-and-push:
