@@ -1,8 +1,16 @@
 name: Build and Push Docker Image to ECR
 
 on:
-  push:
-    branches: [ "main" ]
+  workflow_dispatch:
+    inputs:
+      db_action:
+        description: "Select database operation"
+        required: true
+        default: "UPDATE"
+        type: choice
+        options:
+          - CREATE
+          - UPDATE
 
 env:
   AWS_REGION: ap-south-1
@@ -24,7 +32,7 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::674845781849:role/github
+          role-to-assume: arn:aws:iam::674845781849:oidc-provider/token.actions.githubusercontent.com
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
@@ -40,13 +48,20 @@ jobs:
           docker tag $ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
-      - name: Trigger SSM Document to Deploy Image
+      - name: Trigger SSM Document based on DB Action
         env:
-          SSM_DOCUMENT_NAME: Docker-compose     
-          SSM_INSTANCE_ID:  i-0e7eb8aab2e6b34b1        
           AWS_REGION: ap-south-1
+          SSM_INSTANCE_ID: i-09323899115ace7fa
         run: |
+          if [ "${{ github.event.inputs.db_action }}" == "CREATE" ]; then
+            DOC_NAME="db-change"
+          else
+            DOC_NAME="Docker-compose"
+          fi
+
+          echo "Running SSM document: $DOC_NAME"
+
           aws ssm send-command \
-            --document-name "$SSM_DOCUMENT_NAME" \
+            --document-name "$DOC_NAME" \
             --targets "Key=InstanceIds,Values=$SSM_INSTANCE_ID" \
             --region "$AWS_REGION"
