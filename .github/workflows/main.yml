@@ -5,11 +5,11 @@ on:
       db_action:
         description: "Database action"
         required: true
-        default: "UPDATE"
+        default: "no"
         type: choice
         options:
-          - "CREATE"
-          - "UPDATE"
+          - "yes"
+          - "no"
 
       s3_flush:
         description: "Flush S3 bucket?"
