@@ -1,81 +1,79 @@
-name: Full Deploy Workflow
+name: Deploy with Optional DB Flush and Live Logs
+
 on:
   workflow_dispatch:
     inputs:
-      db_action:
-        description: "Database action"
+      dbAction:
+        description: "Flush DB?"
         required: true
         default: "no"
         type: choice
-        options:
-          - "yes"
-          - "no"
-
-      s3_flush:
-        description: "Flush S3 bucket?"
+        options: [yes, no]
+      s3Action:
+        description: "Flush S3?"
         required: true
         default: "no"
         type: choice
-        options:
-          - "yes"
-          - "no"
-
-      cognito_flush:
-        description: "Delete Cognito users?"
+        options: [yes, no]
+      cognitoAction:
+        description: "Flush Cognito?"
         required: true
         default: "no"
         type: choice
-        options:
-          - "yes"
-          - "no"
+        options: [yes, no]
 
 env:
   AWS_REGION: ap-south-1
-  INSTANCE_ID: i-069e419b4b1b29dc3
-  SSM_DOCUMENT_NAME: depoyment
-  ECR_REGISTRY: 674845781849.dkr.ecr.ap-south-1.amazonaws.com
-  ECR_REPOSITORY: demo
-
-permissions:
-  id-token: write
-  contents: read
+  INSTANCE_ID: i-0e7eb8aab2e6b34b1
+  SSM_DOCUMENT_NAME: FlushAndDeploy
 
 jobs:
-  flush-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
 
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    permissions:
+      id-token: write
+      contents: read
 
-      - name: Configure AWS credentials (OIDC)
+    steps:
+      - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::674845781849:role/github
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Login to Amazon ECR
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build, Tag, and Push Docker Image
-        env:
-          IMAGE_TAG: ${{ github.run_number }}
+      - name: Trigger SSM Document
+        id: trigger_ssm
         run: |
-          echo "🔨 Building Docker image: $IMAGE_TAG"
-          docker build -t $ECR_REPOSITORY:$IMAGE_TAG .
-          docker tag $ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          echo "Triggering SSM document with input values..."
+          command_id=$(aws ssm send-command \
+            --document-name "${SSM_DOCUMENT_NAME}" \
+            --targets "Key=InstanceIds,Values=${INSTANCE_ID}" \
+            --parameters dbAction=${{ github.event.inputs.dbAction }},s3Action=${{ github.event.inputs.s3Action }},cognitoAction=${{ github.event.inputs.cognitoAction }} \
+            --region "${AWS_REGION}" \
+            --query "Command.CommandId" --output text)
 
-      - name: Trigger SSM Document with Selected Options
+          echo "command_id=$command_id" >> $GITHUB_OUTPUT
+
+      - name: Simulate Live Log Stream
         run: |
-          echo "🚀 Triggering SSM document with:"
-          echo " - DB Action: ${{ github.event.inputs.db_action }}"
-          echo " - S3 Flush:  ${{ github.event.inputs.s3_flush }}"
-          echo " - Cognito Flush: ${{ github.event.inputs.cognito_flush }}"
+          echo "⏳ Streaming SSM logs..."
+          command_id=${{ steps.trigger_ssm.outputs.command_id }}
+          status="InProgress"
+          while [[ "$status" == "InProgress" || "$status" == "Pending" ]]; do
+            output=$(aws ssm get-command-invocation \
+              --command-id "$command_id" \
+              --instance-id "${INSTANCE_ID}" \
+              --region "${AWS_REGION}" \
+              --output json)
 
-          aws ssm send-command \
-            --document-name "$SSM_DOCUMENT_NAME" \
-            --targets "Key=InstanceIds,Values=${{ env.INSTANCE_ID }}" \
-            --region "${{ env.AWS_REGION }}" \
-            --parameters "dbAction=${{ github.event.inputs.db_action }},s3Action=${{ github.event.inputs.s3_flush }},cognitoAction=${{ github.event.inputs.cognito_flush }}" \
-            --comment "Deploy with inputs from GitHub Actions"
+            status=$(echo "$output" | jq -r '.Status')
+            echo "Status: $status"
+            echo "------ STDOUT ------"
+            echo "$output" | jq -r '.StandardOutputContent'
+            echo "------ STDERR ------"
+            echo "$output" | jq -r '.StandardErrorContent'
+            echo "--------------------"
+            [[ "$status" == "Success" || "$status" == "Failed" || "$status" == "Cancelled" ]] && break
+            sleep 5
+          done
