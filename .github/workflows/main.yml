@@ -31,7 +31,7 @@ on:
 
 env:
   AWS_REGION: ap-south-1
-  INSTANCE_ID: i-0e7eb8aab2e6b34b1
+  INSTANCE_ID: i-069e419b4b1b29dc3
   SSM_DOCUMENT_NAME: deployment
   ECR_REGISTRY: 674845781849.dkr.ecr.ap-south-1.amazonaws.com
   ECR_REPOSITORY: demo
