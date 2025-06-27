@@ -1,15 +1,16 @@
 name: Full Deploy Workflow
+
 on:
   workflow_dispatch:
     inputs:
       db_action:
         description: "Database action"
         required: true
-        default: "no"
+        default: "UPDATE"
         type: choice
         options:
-          - "yes"
-          - "no"
+          - "CREATE"
+          - "UPDATE"
 
       s3_flush:
         description: "Flush S3 bucket?"
@@ -29,12 +30,24 @@ on:
           - "yes"
           - "no"
 
+      development:
+        description: "Choose development environment"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+          - "dev"
+          - "test"
+
 env:
   AWS_REGION: ap-south-1
-  INSTANCE_ID: i-069e419b4b1b29dc3
-  SSM_DOCUMENT_NAME: depoyment
-  ECR_REGISTRY: 674845781849.dkr.ecr.ap-south-1.amazonaws.com
-  ECR_REPOSITORY: demo
+  INSTANCE_ID: i-0e7eb8aab2e6b34b1
+  SSM_DOCUMENT_NAME: Full-Deploy-Document
+  Dev_ECR_REGISTRY: 674845781849.dkr.ecr.ap-south-1.amazonaws.com
+  UAT_ECR_REGISTRY: 674845781849.dkr.ecr.ap-south-1.amazonaws.com
+  Dev_REPOSITORY: demo-dev
+  Test_REPOSITORY: demo-test
+  IMAGE_NAME: demo-image
 
 permissions:
   id-token: write
@@ -61,19 +74,33 @@ jobs:
         env:
           IMAGE_TAG: ${{ github.run_number }}
         run: |
-          echo "🔨 Building Docker image: $IMAGE_TAG"
-          docker build -t $ECR_REPOSITORY:$IMAGE_TAG .
-          docker tag $ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          echo "🔨 Building Docker image with tag: $IMAGE_TAG"
+
+          if [ "${{ github.event.inputs.development }}" == "dev" ]; then
+            ECR_REPOSITORY=${{ env.Dev_REPOSITORY }}
+            ECR_REGISTRY=${{ env.Dev_ECR_REGISTRY }}
+            echo "Using DEV ECR: $ECR_REGISTRY/$ECR_REPOSITORY"
+          else
+            ECR_REPOSITORY=${{ env.Test_REPOSITORY }}
+            ECR_REGISTRY=${{ env.UAT_ECR_REGISTRY }}
+            echo "Using TEST ECR: $ECR_REGISTRY/$ECR_REPOSITORY"
+          fi
+
+          docker build -t ${{ env.IMAGE_NAME }}:$IMAGE_TAG .
+          docker tag ${{ env.IMAGE_NAME }}:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
       - name: Trigger SSM Document with Selected Options
         run: |
-          echo "🚀 Triggering SSM document with:"
+          echo " Triggering SSM document with:"
           echo " - DB Action: ${{ github.event.inputs.db_action }}"
           echo " - S3 Flush:  ${{ github.event.inputs.s3_flush }}"
           echo " - Cognito Flush: ${{ github.event.inputs.cognito_flush }}"
+          echo " - Environment: ${{ github.event.inputs.development }}"
+
           aws ssm send-command \
             --document-name "$SSM_DOCUMENT_NAME" \
             --targets "Key=InstanceIds,Values=${{ env.INSTANCE_ID }}" \
             --region "${{ env.AWS_REGION }}" \
-            --parameters "dbAction=${{ github.event.inputs.db_action }},s3Action=${{ github.event.inputs.s3_flush }},cognitoAction=${{ github.event.inputs.cognito_flush }}" \
-            --comment "Deploy with inputs from GitHub Actions"
+            --parameters "development=${{ github.event.inputs.development}},dbAction=${{ github.event.inputs.db_action}},s3Action=${{ github.event.inputs.s3_flush}},cognitoAction=${{ github.event.inputs.cognito_flush}}" \
+            --comment "Deploy triggered by GitHub Actions"
