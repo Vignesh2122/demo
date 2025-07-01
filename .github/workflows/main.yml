@@ -52,6 +52,7 @@ env:
 permissions:
   id-token: write
   contents: read
+  issues: write   
 
 jobs:
   flush-and-deploy:
@@ -90,9 +91,25 @@ jobs:
           docker tag ${{ env.IMAGE_NAME }}:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
+      - name: Wait for manual approval before deployment
+        uses: trstringer/manual-approval@v1
+        with:
+          secret: ${{ secrets.TOKEN }}
+          approvers: GokulJ17
+          minimum-approvals: 1
+          issue-title: "🚨 Approval Required: Deploy v${{ github.run_number }} to ${{ github.event.inputs.development }}"
+          issue-body: |
+            Please approve or deny the deployment:
+            - Environment: ${{ github.event.inputs.development }}
+            - DB Action: ${{ github.event.inputs.db_action }}
+            - S3 Flush:  ${{ github.event.inputs.s3_flush }}
+            - Cognito Flush: ${{ github.event.inputs.cognito_flush }}
+          fail-on-denial: true
+          exclude-workflow-initiator-as-approver: false
+
       - name: Trigger SSM Document with Selected Options
         run: |
-          echo " Triggering SSM document with:"
+          echo "🚀 Triggering SSM document with:"
           echo " - DB Action: ${{ github.event.inputs.db_action }}"
           echo " - S3 Flush:  ${{ github.event.inputs.s3_flush }}"
           echo " - Cognito Flush: ${{ github.event.inputs.cognito_flush }}"
