@@ -1,10 +1,9 @@
-name: Secure CI Pipeline
+name: Full deployment workflow with security scan
 
 on:
   push:
-    branches: [main]
-  pull_request:
-  workflow_dispatch:
+    branches: 
+      - main
 
 permissions:
   contents: read
@@ -14,36 +13,33 @@ permissions:
   issues: write
 
 jobs:
-  security-checks:
-    name: Security Checks
+  security-scan:
+    name: gitleaks
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
         with:
           fetch-depth: 0
-
-      # --- Gitleaks Scan ---
-      - name: Run Gitleaks
-        uses: gitleaks/gitleaks-action@v2
+      - uses: gitleaks/gitleaks-action@v2
         with:
           scan-mode: all
+          report-format: sarif
+          report-path: gitleaks.sarif
         env:
           GITHUB_TOKEN: ${{ secrets.TOKEN }}
 
-      # --- Create Report Directory ---
-      - name: Create report directory
-        run: mkdir -p security-reports
-
-      # --- Dependency Review ---
+      - name: Upload Gitleaks SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: gitleaks.sarif
+            
       - name: Dependency Review
         uses: actions/dependency-review-action@v3
         with:
           fail-on-severity: high
         continue-on-error: true
 
-      # --- CodeQL Scan ---
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
@@ -52,64 +48,72 @@ jobs:
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
 
-      # --- Docker Build ---
-      - name: Build Docker Image
-        run: docker build -t secure-app:latest .
-
-      # --- Trivy Scan (JSON + HTML) ---
-      - name: Run Trivy Scan
-        run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -
-          ./bin/trivy image --format json -o security-reports/trivy.json secure-app:latest || true
-          ./bin/trivy image --format template --template "@contrib/html.tpl" \
-            -o security-reports/trivy-report.html secure-app:latest || true
-
-      # --- Generate GitHub Issue Body from Findings ---
-      - name: Generate Issue Body
-        run: |
-          echo "## 🔐 Security Scan Report – Run #${{ github.run_number }}" > issue-body.md
-          echo "" >> issue-body.md
-
-          if [ -f security-reports/trivy.json ]; then
-            echo "### 🐳 Docker Vulnerabilities (Trivy)" >> issue-body.md
-            jq -r '
-              .Results[]? 
-              | select(.Vulnerabilities != null) 
-              | .Vulnerabilities[] 
-              | "- **\(.Severity)**: \(.PkgName) – \(.VulnerabilityID): \(.Title)"' \
-              security-reports/trivy.json >> issue-body.md || echo "No Trivy issues found." >> issue-body.md
-          else
-            echo "- Trivy report missing." >> issue-body.md
-          fi
-
-          echo "" >> issue-body.md
-
-          if [ -f security-reports/trufflehog.json ]; then
-            echo "### 🔑 Secrets Detected (TruffleHog)" >> issue-body.md
-            jq -r '
-              .[]? 
-              | select(.SourceMetadata? != null) 
-              | "- \(.DetectorName): found in \(.SourceMetadata.Data.Filename // "unknown")"' \
-              security-reports/trufflehog.json >> issue-body.md || echo "No secrets found." >> issue-body.md
-          else
-            echo "- TruffleHog report missing." >> issue-body.md
-          fi
-
-          echo "" >> issue-body.md
-          echo "[📄 Download Full Trivy HTML Report](../../actions/runs/${{ github.run_id }})" >> issue-body.md
-          echo "_You can find the report in the 'Artifacts' section of this workflow run._" >> issue-body.md
-
-      # --- Create GitHub Issue ---
-      - name: Create GitHub Issue
-        uses: peter-evans/create-issue-from-file@v5
+  jobs:
+    Build :
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          title: "🔐 Security Scan Report - Run #${{ github.run_number }}"
-          content-filepath: issue-body.md
-          labels: security, automated-scan
+          role-to-assume: arn:aws:iam::674845781849:role/github
+          aws-region: ${{ env.AWS_REGION }}
 
-      # --- Upload All Reports as Artifact ---
-      - name: Upload Security Reports
-        uses: actions/upload-artifact@v4
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name : Build, Tag, and Push Docker Image
+        run: |
+          docker build -t dashboard:${{ github.run_number }} .
+          docker login --username AWS --password $(aws ecr get-login-password --region ${{ env.AWS_REGION }}) $ECR_REGISTRY
+          docker tag dashboard:${{ github.run_number }} $ECR_REGISTRY/dashboard:${{ github.run_number }}
+          docker push $ECR_REGISTRY/dashboard:${{ github.run_number }}
+       
+      - name : trivy scan
+        uses: aquasecurity/trivy-action@v0.4.0
         with:
-          name: security-scan-reports
-          path: security-reports/
+          image-ref: $ECR_REGISTRY/dashboard:${{ github.run_number }}
+          format: sarif
+          output: trivy-scan.sarif
+          severity-threshold: HIGH
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload SARIF file
+        uses: github/codeql-action/upload-sarif@v2  
+        with:
+          sarif_file: trivy-scan.sarif
+
+    jobs:
+      Deploy :
+      runs-on: ubuntu-latest
+      steps:
+        - name: Checkout code
+          uses: actions/checkout@v4
+
+        - name: Configure AWS credentials (OIDC)
+          uses: aws-actions/configure-aws-credentials@v4
+          with:
+            role-to-assume: arn:aws:iam::674845781849:role/github
+            aws-region: ${{ env.AWS_REGION }}
+
+        - name: Deploy to EC2 Instance
+          run: |
+            aws ssm send-command \
+              --document-name "${{ env.SSM_DOCUMENT_NAME }}" \
+              --targets "Key=instanceids,Values=${{ env.INSTANCE_ID }}" \
+              --comment "Deploying application" \
+              --parameters '{"ImageTag":["${{ env.IMAGE_TAG }}"],"Environment":["${{ env.ENVIRONMENT }}"]}' \
+              --region "${{ env.AWS_REGION }}"
+
+
+
+
+
+
+
+
+
+
+
+
+
