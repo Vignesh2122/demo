@@ -35,7 +35,7 @@ jobs:
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
-          languages: javascript  # Adjust to your codebase
+          languages: javascript  # Adjust as needed
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
@@ -53,11 +53,13 @@ jobs:
             -o security-reports/trivy-report.html secure-app:latest || true
           ls -lh security-reports/
 
-      # --- TruffleHog Secrets Scan ---
-      - name: Run TruffleHog Scan
-        run: |
-          pip install trufflehog
-          trufflehog git file://. --json > security-reports/trufflehog.json || true
+      # ✅ --- TruffleHog Secrets Scan (GitHub Action) ---
+      - name: Secrets Scan (TruffleHog)
+        uses: trufflesecurity/trufflehog@v3
+        with:
+          scan: git
+          output: security-reports/trufflehog.json
+          format: json
 
       # --- Generate GitHub Issue Body ---
       - name: Generate Issue Body
