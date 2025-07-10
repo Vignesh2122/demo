@@ -12,16 +12,27 @@ permissions:
   packages: read
   issues: write
 
+env:
+  AWS_REGION: us-east-1                   # Set your default AWS region here
+  ECR_REGISTRY: <your-account>.dkr.ecr.us-east-1.amazonaws.com  # Replace with your ECR registry
+  SSM_DOCUMENT_NAME: YourSSMDocument      # Replace with your SSM document
+  INSTANCE_ID: i-xxxxxxxxxxxxxxxxx        # Replace with actual instance ID
+  ENVIRONMENT: production
+  IMAGE_TAG: ${{ github.run_number }}
+
 jobs:
   security-scan:
-    name: gitleaks
+    name: Security Scans (Gitleaks, CodeQL, Dependency Review)
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
-      - uses: actions/checkout@v3
+        uses: actions/checkout@v3
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
         with:
           scan-mode: all
           report-format: sarif
@@ -33,7 +44,7 @@ jobs:
         uses: github/codeql-action/upload-sarif@v2
         with:
           sarif_file: gitleaks.sarif
-            
+
       - name: Dependency Review
         uses: actions/dependency-review-action@v3
         with:
@@ -48,10 +59,14 @@ jobs:
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
 
-  jobs:
-    Build :
+  build:
+    name: Build & Push Docker Image + Trivy Scan
     runs-on: ubuntu-latest
+
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -61,14 +76,14 @@ jobs:
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name : Build, Tag, and Push Docker Image
+      - name: Build, Tag, and Push Docker Image
         run: |
           docker build -t dashboard:${{ github.run_number }} .
           docker login --username AWS --password $(aws ecr get-login-password --region ${{ env.AWS_REGION }}) $ECR_REGISTRY
           docker tag dashboard:${{ github.run_number }} $ECR_REGISTRY/dashboard:${{ github.run_number }}
           docker push $ECR_REGISTRY/dashboard:${{ github.run_number }}
-       
-      - name : trivy scan
+
+      - name: Trivy Scan on Image
         uses: aquasecurity/trivy-action@v0.4.0
         with:
           image-ref: $ECR_REGISTRY/dashboard:${{ github.run_number }}
@@ -78,42 +93,30 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload SARIF file
+      - name: Upload Trivy SARIF to GitHub Security
         uses: github/codeql-action/upload-sarif@v2  
         with:
           sarif_file: trivy-scan.sarif
 
-    jobs:
-      Deploy :
-      runs-on: ubuntu-latest
-      steps:
-        - name: Checkout code
-          uses: actions/checkout@v4
+  deploy:
+    name: Deploy to EC2 via SSM
+    runs-on: ubuntu-latest
 
-        - name: Configure AWS credentials (OIDC)
-          uses: aws-actions/configure-aws-credentials@v4
-          with:
-            role-to-assume: arn:aws:iam::674845781849:role/github
-            aws-region: ${{ env.AWS_REGION }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-        - name: Deploy to EC2 Instance
-          run: |
-            aws ssm send-command \
-              --document-name "${{ env.SSM_DOCUMENT_NAME }}" \
-              --targets "Key=instanceids,Values=${{ env.INSTANCE_ID }}" \
-              --comment "Deploying application" \
-              --parameters '{"ImageTag":["${{ env.IMAGE_TAG }}"],"Environment":["${{ env.ENVIRONMENT }}"]}' \
-              --region "${{ env.AWS_REGION }}"
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::674845781849:role/github
+          aws-region: ${{ env.AWS_REGION }}
 
-
-
-
-
-
-
-
-
-
-
-
-
+      - name: Deploy to EC2 Instance via SSM
+        run: |
+          aws ssm send-command \
+            --document-name "${{ env.SSM_DOCUMENT_NAME }}" \
+            --targets "Key=instanceids,Values=${{ env.INSTANCE_ID }}" \
+            --comment "Deploying application" \
+            --parameters '{"ImageTag":["${{ env.IMAGE_TAG }}"],"Environment":["${{ env.ENVIRONMENT }}"]}' \
+            --region "${{ env.AWS_REGION }}"
