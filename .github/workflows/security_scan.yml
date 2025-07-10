@@ -24,13 +24,13 @@ jobs:
         uses: actions/dependency-review-action@v3
         with:
           fail-on-severity: high
-        continue-on-error: true  # Optional: don't fail build
-          
+        continue-on-error: true  # Optional: don't fail the build
+
       # --- Static Code Analysis with CodeQL ---
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
-          languages: javascript  # Or python, java, etc.
+          languages: javascript  # Change as needed
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
@@ -46,9 +46,9 @@ jobs:
         with:
           image-ref: secure-app:latest
           format: table
-          exit-code: 0  # Do not block build
+          exit-code: 0  # Do not block build on vulnerability
           severity: CRITICAL,HIGH
 
-      # --- Optional: Secrets Scan with TruffleHog ---
+      # --- Secrets Scan with TruffleHog ---
       - name: Secrets Scan
-      - uses: trufflesecurity/trufflehog@v3.0.0
+        uses: trufflesecurity/trufflehog@v3.0.0
