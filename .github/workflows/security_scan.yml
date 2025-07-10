@@ -18,48 +18,49 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
+      # ✅ Checkout your source code
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Create report directory
         run: mkdir -p security-reports
 
-      # --- Dependency Review (GitHub-native) ---
+      # ✅ Dependency Review
       - name: Dependency Review
         uses: actions/dependency-review-action@v3
         with:
           fail-on-severity: high
         continue-on-error: true
 
-      # --- CodeQL Analysis ---
+      # ✅ CodeQL Scan
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
-          languages: javascript
+          languages: javascript  # Replace with your language (python, go, etc.)
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
 
-      # --- Docker Build ---
+      # ✅ Build Docker image
       - name: Build Docker Image
         run: docker build -t secure-app:latest .
 
-      # --- Trivy Scan (JSON + HTML) ---
+      # ✅ Trivy Vulnerability Scan (JSON + HTML)
       - name: Run Trivy Scan
         run: |
           curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -
-          ./trivy image --format json -o security-reports/trivy.json secure-app:latest || true
-          ./trivy image --format template --template "@contrib/html.tpl" \
+          ./bin/trivy image --format json -o security-reports/trivy.json secure-app:latest || true
+          ./bin/trivy image --format template --template "@contrib/html.tpl" \
             -o security-reports/trivy-report.html secure-app:latest || true
           ls -lh security-reports/
 
-      # --- TruffleHog Secrets Scan ---
+      # ✅ TruffleHog Secrets Scan
       - name: Run TruffleHog Scan
         run: |
           pip install trufflehog
           trufflehog git file://. --json > security-reports/trufflehog.json || true
 
-      # --- Generate Issue Markdown from Reports ---
+      # ✅ Generate GitHub Issue Markdown
       - name: Generate Issue Body
         run: |
           echo "## 🔐 Security Scan Report – Run #${{ github.run_number }}" > issue-body.md
@@ -91,9 +92,9 @@ jobs:
           fi
 
           echo "" >> issue-body.md
-          echo "_Full HTML vulnerability report is attached as artifact._" >> issue-body.md
+          echo "_📄 Full Trivy HTML report attached as artifact._" >> issue-body.md
 
-      # --- Create GitHub Issue from Markdown ---
+      # ✅ Create GitHub Issue with summary
       - name: Create GitHub Issue
         uses: peter-evans/create-issue-from-file@v5
         with:
@@ -101,7 +102,7 @@ jobs:
           content-filepath: issue-body.md
           labels: security, automated-scan
 
-      # --- Upload All Reports as Artifact ---
+      # ✅ Upload All Security Reports
       - name: Upload Security Reports
         uses: actions/upload-artifact@v4
         with:
