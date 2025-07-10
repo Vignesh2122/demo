@@ -11,7 +11,7 @@ permissions:
   security-events: write
   actions: read
   packages: read
-  issues: write  # Required to create GitHub issues
+  issues: write
 
 jobs:
   security-checks:
@@ -21,44 +21,45 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Create reports folder
+      - name: Create report directory
         run: mkdir -p security-reports
 
-      # --- Dependency Review ---
+      # --- Dependency Review (GitHub-native) ---
       - name: Dependency Review
         uses: actions/dependency-review-action@v3
         with:
           fail-on-severity: high
         continue-on-error: true
 
-      # --- CodeQL ---
+      # --- CodeQL Analysis ---
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
-          languages: javascript  # Change as needed
+          languages: javascript
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
 
-      # --- Build Docker Image ---
+      # --- Docker Build ---
       - name: Build Docker Image
         run: docker build -t secure-app:latest .
 
-      # --- Trivy Scan (HTML + JSON) ---
-      - name: Trivy Scan
+      # --- Trivy Scan (JSON + HTML) ---
+      - name: Run Trivy Scan
         run: |
           curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -
           ./trivy image --format json -o security-reports/trivy.json secure-app:latest || true
           ./trivy image --format template --template "@contrib/html.tpl" \
             -o security-reports/trivy-report.html secure-app:latest || true
+          ls -lh security-reports/
 
-      # --- TruffleHog Secret Scan ---
-      - name: TruffleHog Scan
+      # --- TruffleHog Secrets Scan ---
+      - name: Run TruffleHog Scan
         run: |
           pip install trufflehog
           trufflehog git file://. --json > security-reports/trufflehog.json || true
 
-      # --- Generate Markdown Issue Summary ---
+      # --- Generate Issue Markdown from Reports ---
       - name: Generate Issue Body
         run: |
           echo "## 🔐 Security Scan Report – Run #${{ github.run_number }}" > issue-body.md
@@ -66,7 +67,12 @@ jobs:
 
           if [ -f security-reports/trivy.json ]; then
             echo "### 🐳 Docker Vulnerabilities (Trivy)" >> issue-body.md
-            jq -r '.Results[]?.Vulnerabilities[]? | "- **\(.Severity)**: \(.PkgName) – \(.VulnerabilityID): \(.Title)"' security-reports/trivy.json >> issue-body.md || echo "No vulnerabilities found" >> issue-body.md
+            jq -r '
+              .Results[]? 
+              | select(.Vulnerabilities != null) 
+              | .Vulnerabilities[] 
+              | "- **\(.Severity)**: \(.PkgName) – \(.VulnerabilityID): \(.Title)"' \
+              security-reports/trivy.json >> issue-body.md || echo "No Trivy issues found." >> issue-body.md
           else
             echo "- Trivy report missing." >> issue-body.md
           fi
@@ -75,15 +81,19 @@ jobs:
 
           if [ -f security-reports/trufflehog.json ]; then
             echo "### 🔑 Secrets Detected (TruffleHog)" >> issue-body.md
-            jq -r '.[] | "- \(.DetectorName): found in \(.SourceMetadata.Data.Filename)"' security-reports/trufflehog.json >> issue-body.md || echo "No secrets found" >> issue-body.md
+            jq -r '
+              .[]? 
+              | select(.SourceMetadata? != null) 
+              | "- \(.DetectorName): found in \(.SourceMetadata.Data.Filename // "unknown")"' \
+              security-reports/trufflehog.json >> issue-body.md || echo "No secrets found." >> issue-body.md
           else
             echo "- TruffleHog report missing." >> issue-body.md
           fi
 
           echo "" >> issue-body.md
-          echo "_Full HTML report attached as artifact._" >> issue-body.md
+          echo "_Full HTML vulnerability report is attached as artifact._" >> issue-body.md
 
-      # --- Create GitHub Issue ---
+      # --- Create GitHub Issue from Markdown ---
       - name: Create GitHub Issue
         uses: peter-evans/create-issue-from-file@v5
         with:
@@ -91,9 +101,9 @@ jobs:
           content-filepath: issue-body.md
           labels: security, automated-scan
 
-      # --- Upload Reports as Artifact ---
+      # --- Upload All Reports as Artifact ---
       - name: Upload Security Reports
         uses: actions/upload-artifact@v4
         with:
-          name: security-reports
+          name: security-scan-reports
           path: security-reports/
