@@ -59,6 +59,7 @@ jobs:
           scan: git
           output: security-reports/trufflehog.json
           format: json
+          location : .
 
       # Generate GitHub Issue from Findings
       - name: Generate Issue Body
