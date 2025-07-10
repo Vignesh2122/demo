@@ -1,0 +1,40 @@
+name: Secure CI Pipeline
+
+on:
+  push:
+    branches:
+    - main  
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      # Dependency Scan
+      - name: Dependency Review
+        continue-on-error: true
+        uses: actions/dependency-review-action@v3
+        with:
+          fail-on-severity: high
+
+      # Secret Scan
+      - name: Secret Scan
+        uses: trufflesecurity/trufflehog@v3
+
+      # CodeQL Scan
+      - name: CodeQL Init
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript
+      - name: CodeQL Analyze
+        uses: github/codeql-action/analyze@v3
+
+      # Docker Scan
+      - name: Docker Build
+        run: docker build -t my-app:latest .
+      - name: Docker Scan with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: my-app:latest
+          exit-code: 0
+          severity: HIGH,CRITICAL
