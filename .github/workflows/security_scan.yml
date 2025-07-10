@@ -14,29 +14,36 @@ permissions:
   issues: write
 
 jobs:
-    name: gitleaks
+  security-checks:
+    name: Security Checks
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v3
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
-        with :
-          scan-mode : all
+
+      # --- Gitleaks Scan ---
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        with:
+          scan-mode: all
         env:
           GITHUB_TOKEN: ${{ secrets.TOKEN }}
 
+      # --- Create Report Directory ---
       - name: Create report directory
         run: mkdir -p security-reports
 
-      # Dependency Review
+      # --- Dependency Review ---
       - name: Dependency Review
         uses: actions/dependency-review-action@v3
         with:
           fail-on-severity: high
         continue-on-error: true
 
-      # CodeQL Scan
+      # --- CodeQL Scan ---
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
@@ -45,11 +52,11 @@ jobs:
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
 
-      # Docker Build
+      # --- Docker Build ---
       - name: Build Docker Image
         run: docker build -t secure-app:latest .
 
-      # Trivy Scan (JSON + HTML)
+      # --- Trivy Scan (JSON + HTML) ---
       - name: Run Trivy Scan
         run: |
           curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -
@@ -57,9 +64,7 @@ jobs:
           ./bin/trivy image --format template --template "@contrib/html.tpl" \
             -o security-reports/trivy-report.html secure-app:latest || true
 
-    
-
-      # Generate GitHub Issue from Findings
+      # --- Generate GitHub Issue Body from Findings ---
       - name: Generate Issue Body
         run: |
           echo "## 🔐 Security Scan Report – Run #${{ github.run_number }}" > issue-body.md
@@ -94,7 +99,7 @@ jobs:
           echo "[📄 Download Full Trivy HTML Report](../../actions/runs/${{ github.run_id }})" >> issue-body.md
           echo "_You can find the report in the 'Artifacts' section of this workflow run._" >> issue-body.md
 
-      # Create GitHub Issue
+      # --- Create GitHub Issue ---
       - name: Create GitHub Issue
         uses: peter-evans/create-issue-from-file@v5
         with:
@@ -102,7 +107,7 @@ jobs:
           content-filepath: issue-body.md
           labels: security, automated-scan
 
-      # Upload All Reports
+      # --- Upload All Reports as Artifact ---
       - name: Upload Security Reports
         uses: actions/upload-artifact@v4
         with:
