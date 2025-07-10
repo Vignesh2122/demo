@@ -14,40 +14,49 @@ permissions:
   issues: write
 
 jobs:
-    name: gitleaks
+  secure-scan:
+    name: Secure Scanning Workflow
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v3
+      # Checkout the repository with full history
+      - name: Checkout code
+        uses: actions/checkout@v3
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
+
+      # Run Gitleaks for secret scanning
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.TOKEN }}
 
+      # Create report directory
       - name: Create report directory
         run: mkdir -p security-reports
 
-      # Dependency Review
+      # Dependency Review (JS packages, etc.)
       - name: Dependency Review
         uses: actions/dependency-review-action@v3
         with:
           fail-on-severity: high
         continue-on-error: true
 
-      # CodeQL Scan
+      # Initialize CodeQL
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
           languages: javascript
 
+      # CodeQL analysis
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
 
-      # Docker Build
+      # Build Docker image
       - name: Build Docker Image
         run: docker build -t secure-app:latest .
 
-      # Trivy Scan (JSON + HTML)
+      # Run Trivy image scan (JSON + HTML)
       - name: Run Trivy Scan
         run: |
           curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -
@@ -55,9 +64,17 @@ jobs:
           ./bin/trivy image --format template --template "@contrib/html.tpl" \
             -o security-reports/trivy-report.html secure-app:latest || true
 
-    
+      # Run TruffleHog (GitHub scan mode)
+      - name: Run TruffleHog GitHub Scan
+        uses: trufflesecurity/trufflehog@v3.89.2
+        with:
+          scan: github
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          github_repo: ${{ github.repository }}
+          output: security-reports/trufflehog.json
+          format: json
 
-      # Generate GitHub Issue from Findings
+      # Generate Markdown summary for GitHub Issue
       - name: Generate Issue Body
         run: |
           echo "## 🔐 Security Scan Report – Run #${{ github.run_number }}" > issue-body.md
@@ -92,7 +109,7 @@ jobs:
           echo "[📄 Download Full Trivy HTML Report](../../actions/runs/${{ github.run_id }})" >> issue-body.md
           echo "_You can find the report in the 'Artifacts' section of this workflow run._" >> issue-body.md
 
-      # Create GitHub Issue
+      # Create GitHub Issue from security findings
       - name: Create GitHub Issue
         uses: peter-evans/create-issue-from-file@v5
         with:
@@ -100,7 +117,7 @@ jobs:
           content-filepath: issue-body.md
           labels: security, automated-scan
 
-      # Upload All Reports
+      # Upload scan reports as artifacts
       - name: Upload Security Reports
         uses: actions/upload-artifact@v4
         with:
