@@ -56,10 +56,14 @@ jobs:
       - name: Secrets Scan (TruffleHog)
         uses: trufflesecurity/trufflehog@v3.76.3
         with:
-          scan: git
+          
+          scan: github
+          github_token: ${{ secrets.TOKEN }} 
+          github_org: Vignesh2122            
+          github_repo: Vignesh.S/demo
           output: security-reports/trufflehog.json
           format: json
-          location : .
+         
 
       # Generate GitHub Issue from Findings
       - name: Generate Issue Body
