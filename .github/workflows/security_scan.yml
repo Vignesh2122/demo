@@ -13,13 +13,16 @@ permissions:
   packages: read
   issues: write
 
-jobs:
-  security-checks:
+steps:
+    name: gitleaks
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.TOKEN }}
 
       - name: Create report directory
         run: mkdir -p security-reports
@@ -52,18 +55,7 @@ jobs:
           ./bin/trivy image --format template --template "@contrib/html.tpl" \
             -o security-reports/trivy-report.html secure-app:latest || true
 
-      # TruffleHog Scan
-      - name: Secrets Scan (TruffleHog)
-        uses: trufflesecurity/trufflehog@v3.76.3
-        with:
-          
-          scan: github
-          github_token: ${{ secrets.TOKEN }} 
-          github_org: Vignesh2122            
-          github_repo: Vignesh.S/demo
-          output: security-reports/trufflehog.json
-          format: json
-         
+    
 
       # Generate GitHub Issue from Findings
       - name: Generate Issue Body
