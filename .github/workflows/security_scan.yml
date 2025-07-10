@@ -24,44 +24,43 @@ jobs:
       - name: Create report directory
         run: mkdir -p security-reports
 
-      # --- Dependency Review ---
+      # Dependency Review
       - name: Dependency Review
         uses: actions/dependency-review-action@v3
         with:
           fail-on-severity: high
         continue-on-error: true
 
-      # --- CodeQL Scan ---
+      # CodeQL Scan
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
-          languages: javascript  # Adjust as needed
+          languages: javascript
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
 
-      # --- Build Docker Image ---
+      # Docker Build
       - name: Build Docker Image
         run: docker build -t secure-app:latest .
 
-      # --- Trivy Vulnerability Scan (JSON + HTML) ---
+      # Trivy Scan (JSON + HTML)
       - name: Run Trivy Scan
         run: |
           curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -
           ./bin/trivy image --format json -o security-reports/trivy.json secure-app:latest || true
           ./bin/trivy image --format template --template "@contrib/html.tpl" \
             -o security-reports/trivy-report.html secure-app:latest || true
-          ls -lh security-reports/
 
-      # ✅ --- TruffleHog Secrets Scan (GitHub Action) ---
+      # TruffleHog Scan
       - name: Secrets Scan (TruffleHog)
         uses: trufflesecurity/trufflehog@v3.76.3
         with:
-        scan: git
-        output: security-reports/trufflehog.json
-        format: json
+          scan: git
+          output: security-reports/trufflehog.json
+          format: json
 
-      # --- Generate GitHub Issue Body ---
+      # Generate GitHub Issue from Findings
       - name: Generate Issue Body
         run: |
           echo "## 🔐 Security Scan Report – Run #${{ github.run_number }}" > issue-body.md
@@ -96,7 +95,7 @@ jobs:
           echo "[📄 Download Full Trivy HTML Report](../../actions/runs/${{ github.run_id }})" >> issue-body.md
           echo "_You can find the report in the 'Artifacts' section of this workflow run._" >> issue-body.md
 
-      # --- Create GitHub Issue ---
+      # Create GitHub Issue
       - name: Create GitHub Issue
         uses: peter-evans/create-issue-from-file@v5
         with:
@@ -104,7 +103,7 @@ jobs:
           content-filepath: issue-body.md
           labels: security, automated-scan
 
-      # --- Upload All Reports as Artifact ---
+      # Upload All Reports
       - name: Upload Security Reports
         uses: actions/upload-artifact@v4
         with:
