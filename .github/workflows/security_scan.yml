@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   security-checks:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
@@ -55,11 +55,11 @@ jobs:
 
       # ✅ --- TruffleHog Secrets Scan (GitHub Action) ---
       - name: Secrets Scan (TruffleHog)
-        uses: trufflesecurity/trufflehog@v3
+        uses: trufflesecurity/trufflehog@v3.76.3
         with:
-          scan: git
-          output: security-reports/trufflehog.json
-          format: json
+        scan: git
+        output: security-reports/trufflehog.json
+        format: json
 
       # --- Generate GitHub Issue Body ---
       - name: Generate Issue Body
