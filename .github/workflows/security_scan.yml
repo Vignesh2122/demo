@@ -13,7 +13,7 @@ permissions:
   packages: read
   issues: write
 
-steps:
+jobs:
     name: gitleaks
     runs-on: ubuntu-latest
     steps:
