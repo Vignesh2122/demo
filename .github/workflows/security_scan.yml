@@ -41,7 +41,7 @@ jobs:
       # 🔐 Secret Scanning with Gitleaks
       # --------------------------------------------
       - name: Run Gitleaks
-        uses: gitleaks/gitleaks-action@v3
+        uses: gitleaks/gitleaks-action@v2
         with:
           scan-mode: all
           report-format: sarif
