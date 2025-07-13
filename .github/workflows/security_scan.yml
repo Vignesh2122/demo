@@ -8,7 +8,7 @@ on:
 
 permissions:
   contents: read
-  security-events: write  # Required to upload SARIF to Security tab
+  security-events: write
 
 jobs:
   security-scan:
@@ -25,10 +25,34 @@ jobs:
           fetch-depth: 0
 
       # --------------------------------------------
-      # 🔐 Git Secrets - Secret Scanning
+      # 🔐 Secret Scanning with TruffleHog
       # --------------------------------------------
-      - name: Run git-secrets
-        uses: aws-actions/git-secrets-scan@master
+      - name: Run TruffleHog
+        uses: trufflesecurity/trufflehog@main
+        with:
+          scanArguments: --format sarif --output trufflehog-results.sarif .
+
+      - name: Upload TruffleHog SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trufflehog-results.sarif
+
+      # --------------------------------------------
+      # 🔐 Secret Scanning with Gitleaks
+      # --------------------------------------------
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v3
+        with:
+          scan-mode: all
+          report-format: sarif
+          report-path: gitleaks-results.sarif
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Gitleaks SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: gitleaks-results.sarif
 
       # --------------------------------------------
       # 🧠 CodeQL Static Code Analysis
@@ -36,21 +60,21 @@ jobs:
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
-          languages: javascript  # Change if needed
+          languages: javascript  # Change if needed (e.g., python, java)
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
 
       # --------------------------------------------
-      # 🕷️ OWASP ZAP - DAST Scan (optional public target)
+      # 🕷️ OWASP ZAP - DAST (Public Target Example)
       # --------------------------------------------
       - name: Run OWASP ZAP Baseline Scan
         uses: zaproxy/action-baseline@v0.10.0
         with:
-          target: 'https://juice-shop.herokuapp.com'  # Replace with your app if hosted
+          target: 'https://juice-shop.herokuapp.com'  # Safe public test app
           format: sarif
           output: zap-results.sarif
-          fail_action: false  # Don't fail the pipeline if vulnerabilities found
+          fail_action: false
 
       - name: Upload ZAP SARIF
         uses: github/codeql-action/upload-sarif@v3
@@ -58,14 +82,14 @@ jobs:
           sarif_file: zap-results.sarif
 
       # --------------------------------------------
-      # 🐳 Docker Image Build
+      # 🐳 Build Docker Image
       # --------------------------------------------
       - name: Build Docker Image
         run: |
           docker build -t myapp-image .
 
       # --------------------------------------------
-      # 🐳 Trivy - Scan Docker Image
+      # 🐳 Trivy - Docker Image & Dependency Scan
       # --------------------------------------------
       - name: Install Trivy
         run: |
@@ -87,9 +111,10 @@ jobs:
           sarif_file: trivy-results.sarif
 
       # --------------------------------------------
-      # 📦 Dependency Review (GitHub Native)
+      # 📦 GitHub Dependency Review (only on PR)
       # --------------------------------------------
       - name: Dependency Review
+        if: github.event_name == 'pull_request'
         uses: actions/dependency-review-action@v3
         with:
           fail-on-severity: high
