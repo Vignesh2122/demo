@@ -1,63 +1,96 @@
-name: Security Scan
+name: Full Security Scan
 
 on:
   push:
     branches:
-      - main  # Automatically runs on every push to main
+      - main
+  pull_request:
 
 permissions:
   contents: read
-  security-events: write  # Needed for uploading SARIF
+  security-events: write  # Required to upload SARIF to Security tab
 
 jobs:
   security-scan:
-    name: Run Gitleaks, CodeQL, and Dependency Review
+    name: Security & Vulnerability Scanning
     runs-on: ubuntu-latest
 
     steps:
+      # --------------------------------------------
+      # 📦 Checkout Code
+      # --------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
 
-      # ------------------------
-      # 🔐 Run Gitleaks
-      # ------------------------
-      - name: Run Gitleaks
-        uses: gitleaks/gitleaks-action@v2
+      # --------------------------------------------
+      # 🔐 Git Secrets - Secret Scanning
+      # --------------------------------------------
+      - name: Run git-secrets
+        uses: aws-actions/git-secrets-scan@master
+
+      # --------------------------------------------
+      # 🧠 CodeQL Static Code Analysis
+      # --------------------------------------------
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
         with:
-          scan-mode: all
-          report-format: sarif
-          report-path: gitleaks.sarif
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          languages: javascript  # Change if needed
 
-      - name: Check if Gitleaks SARIF exists
-        run: ls -lh gitleaks.sarif
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
 
-      - name: Upload Gitleaks SARIF to GitHub Security
+      # --------------------------------------------
+      # 🕷️ OWASP ZAP - DAST Scan (optional public target)
+      # --------------------------------------------
+      - name: Run OWASP ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.10.0
+        with:
+          target: 'https://juice-shop.herokuapp.com'  # Replace with your app if hosted
+          format: sarif
+          output: zap-results.sarif
+          fail_action: false  # Don't fail the pipeline if vulnerabilities found
+
+      - name: Upload ZAP SARIF
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: gitleaks.sarif
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          sarif_file: zap-results.sarif
 
-      # ------------------------
-      # 📦 Dependency Review
-      # ------------------------
+      # --------------------------------------------
+      # 🐳 Docker Image Build
+      # --------------------------------------------
+      - name: Build Docker Image
+        run: |
+          docker build -t myapp-image .
+
+      # --------------------------------------------
+      # 🐳 Trivy - Scan Docker Image
+      # --------------------------------------------
+      - name: Install Trivy
+        run: |
+          sudo apt-get update
+          sudo apt-get install wget -y
+          wget https://github.com/aquasecurity/trivy/releases/latest/download/trivy_0.50.1_Linux-64bit.deb
+          sudo dpkg -i trivy_0.50.1_Linux-64bit.deb
+
+      - name: Run Trivy image scan
+        run: |
+          trivy image myapp-image \
+            --scanners vuln,secret,config \
+            --format sarif \
+            --output trivy-results.sarif
+
+      - name: Upload Trivy SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+
+      # --------------------------------------------
+      # 📦 Dependency Review (GitHub Native)
+      # --------------------------------------------
       - name: Dependency Review
         uses: actions/dependency-review-action@v3
         with:
           fail-on-severity: high
-        continue-on-error: true  # Allows CodeQL to run even if this fails
-
-      # ------------------------
-      # 🧠 CodeQL Scan
-      # ------------------------
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
-        with:
-          languages: javascript  # Change to match your project: e.g., python, java
-
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        continue-on-error: true
