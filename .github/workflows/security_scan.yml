@@ -1,22 +1,28 @@
-name: Security Scan Only
+name: Security Scan
 
 on:
   push:
     branches:
-      - main
-  
+      - main  # Automatically runs on every push to main
+
+permissions:
+  contents: read
+  security-events: write  # Needed for uploading SARIF
 
 jobs:
   security-scan:
-    name: Security Scans Only
+    name: Run Gitleaks, CodeQL, and Dependency Review
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
 
+      # ------------------------
+      # 🔐 Run Gitleaks
+      # ------------------------
       - name: Run Gitleaks
         uses: gitleaks/gitleaks-action@v2
         with:
@@ -26,21 +32,32 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Check if Gitleaks SARIF exists
+        run: ls -lh gitleaks.sarif
+
       - name: Upload Gitleaks SARIF to GitHub Security
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: gitleaks.sarif
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # ------------------------
+      # 📦 Dependency Review
+      # ------------------------
       - name: Dependency Review
         uses: actions/dependency-review-action@v3
         with:
           fail-on-severity: high
-        continue-on-error: true
+        continue-on-error: true  # Allows CodeQL to run even if this fails
 
+      # ------------------------
+      # 🧠 CodeQL Scan
+      # ------------------------
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
-          languages: javascript
+          languages: javascript  # Change to match your project: e.g., python, java
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
