@@ -24,5 +24,6 @@ jobs:
 
     - name: Build and Push
       run: |
-        docker build -t ghcr.io/${{ github.repository_owner }}/my-app:latest .
-        docker push ghcr.io/${{ github.repository_owner }}/my-app:latest
+        docker build -t ghcr.io/vignesh2122/my-app:latest .
+        docker push ghcr.io/vignesh2122/my-app:latest
+
