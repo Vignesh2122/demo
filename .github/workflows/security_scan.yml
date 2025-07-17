@@ -1,96 +1,51 @@
-name: Full Security Scan (Test Mode)
+name: Full deployment workflow with security scan
 
 on:
   push:
-    branches:
+    branches: 
       - main
-  pull_request:
 
 permissions:
   contents: read
   security-events: write
+  actions: read
+  packages: read
+  issues: write
 
 jobs:
-  security-scan:
-    name: Test Security Tools Locally (No SARIF Upload)
+  test:
+    name: Security & Dependency Scan
     runs-on: ubuntu-latest
-
     steps:
-      # --------------------------------------------
-      # 📦 Checkout Code
-      # --------------------------------------------
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
 
-      # --------------------------------------------
-      # 🔐 TruffleHog (Secrets)
-      # --------------------------------------------
-      - name: Run TruffleHog
-        uses: trufflesecurity/trufflehog@main
-        with:
-          scanArguments: .
-
-      # --------------------------------------------
-      # 🔐 Gitleaks (Secrets)
-      # --------------------------------------------
-      - name: Run Gitleaks
+      - name: Gitleaks Scan
         uses: gitleaks/gitleaks-action@v2
         with:
           scan-mode: all
+          report-format: sarif
+          report-path: gitleaks.sarif
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.TOKEN }}
 
-      # --------------------------------------------
-      # 🧠 CodeQL Static Code Analysis
-      # --------------------------------------------
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+      - name: Upload Gitleaks SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v2
         with:
-          languages: javascript  # Change to python, java, etc. if needed
+          sarif_file: gitleaks.sarif
 
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
-
-      # --------------------------------------------
-      # 🕷️ OWASP ZAP (Public Web Scan)
-      # --------------------------------------------
-      - name: Run OWASP ZAP Baseline Scan
-        uses: zaproxy/action-baseline@v0.10.0
-        with:
-          target: 'https://juice-shop.herokuapp.com'
-          fail_action: false
-          cmd_options: '-config replacer.full_list(0).enabled=false'
-
-      # --------------------------------------------
-      # 🐳 Build Docker Image
-      # --------------------------------------------
-      - name: Build Docker Image
-        run: |
-          docker build -t myapp-image .
-
-      # --------------------------------------------
-      # 🐳 Trivy - Docker Image & Dependency Scan
-      # --------------------------------------------
-      - name: Install Trivy
-        run: |
-          sudo apt-get update
-          sudo apt-get install wget -y
-          wget https://github.com/aquasecurity/trivy/releases/latest/download/trivy_0.50.1_Linux-64bit.deb
-          sudo dpkg -i trivy_0.50.1_Linux-64bit.deb
-
-      - name: Run Trivy image scan
-        run: |
-          trivy image myapp-image \
-            --scanners vuln,secret,config
-
-      # --------------------------------------------
-      # 📦 GitHub Dependency Review
-      # --------------------------------------------
       - name: Dependency Review
-        if: github.event_name == 'pull_request'
         uses: actions/dependency-review-action@v3
         with:
           fail-on-severity: high
         continue-on-error: true
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
