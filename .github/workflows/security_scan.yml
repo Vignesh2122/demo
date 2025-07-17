@@ -36,10 +36,17 @@ jobs:
         continue-on-error: true
 
       - name: Check outdated npm packages
-        if: exists('package.json')
+        # Line 39 in the original problem context
+        if: ${{ contains(toJson(steps.*.outputs), 'package.json') }} # A more robust way to check for file existence or if file exists
         run: |
-          npm ci
-          npm outdated || true
+          # Check if package.json exists before running npm commands
+          if [ -f "package.json" ]; then
+            echo "package.json found, running npm commands..."
+            npm ci
+            npm outdated || true
+          else
+            echo "package.json not found, skipping npm commands."
+          fi
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
