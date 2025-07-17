@@ -2,7 +2,7 @@ name: Full deployment workflow with security scan
 
 on:
   push:
-    branches: 
+    branches:
       - main
 
 permissions:
