@@ -1,7 +1,8 @@
 name: Full deployment workflow with security scan
 
 on:
-  push:
+  # Change 'push' to 'pull_request'
+  pull_request:
     branches:
       - main
 
@@ -33,13 +34,14 @@ jobs:
         uses: actions/dependency-review-action@v3
         with:
           fail-on-severity: high
-        continue-on-error: true
+          # repo-token: ${{ secrets.GITHUB_TOKEN }} # GITHUB_TOKEN is usually available by default with appropriate permissions
+          # retry-on-snapshot-warnings: false # These are optional and can be removed if not needed
+          # retry-on-snapshot-warnings-timeout: 120
 
       - name: Check outdated npm packages
-        # Line 39 in the original problem context
-        if: ${{ contains(toJson(steps.*.outputs), 'package.json') }} # A more robust way to check for file existence or if file exists
+        if: exists('package.json') # Use exists() if you're sure about the context
         run: |
-          # Check if package.json exists before running npm commands
+          # It's always good to double-check file existence for robustness
           if [ -f "package.json" ]; then
             echo "package.json found, running npm commands..."
             npm ci
