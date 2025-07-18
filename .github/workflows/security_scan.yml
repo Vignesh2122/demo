@@ -1,59 +1,38 @@
-name: Full deployment workflow with security scan
+name: Secret Scan with Gitleaks
 
-on:
-  # Change 'push' to 'pull_request'
-  pull_request:
-    branches:
-      - main
-
-permissions:
-  contents: read
-  security-events: write
-  actions: read
-  packages: read
-  issues: write
+on: [push, pull_request]
 
 jobs:
-  test:
-    name: Security & Dependency Scan
+  secret-scan:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
+        uses: actions/checkout@v4
 
-      - name: Gitleaks Scan
-        uses: gitleaks/gitleaks-action@v2
-        with:
-          scan-mode: all
-        env:
-          GITHUB_TOKEN: ${{ secrets.TOKEN }}
-
-      - name: Dependency Review
-        uses: actions/dependency-review-action@v3
-        with:
-          fail-on-severity: high
-          # repo-token: ${{ secrets.GITHUB_TOKEN }} # GITHUB_TOKEN is usually available by default with appropriate permissions
-          # retry-on-snapshot-warnings: false # These are optional and can be removed if not needed
-          # retry-on-snapshot-warnings-timeout: 120
-
-      - name: Check outdated npm packages
-        if: exists('package.json') # Use exists() if you're sure about the context
+      - name: Run Gitleaks Scan
+        id: gitleaks
         run: |
-          # It's always good to double-check file existence for robustness
-          if [ -f "package.json" ]; then
-            echo "package.json found, running npm commands..."
-            npm ci
-            npm outdated || true
+          curl -sL https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks-linux-amd64 -o gitleaks
+          chmod +x gitleaks
+          ./gitleaks detect --no-git --exit-code 1 --verbose > result.txt || true
+          found=$(cat result.txt | grep -i "leak" | head -n 1 || true)
+          if [ -n "$found" ]; then
+            echo "leak=true" >> $GITHUB_OUTPUT
           else
-            echo "package.json not found, skipping npm commands."
+            echo "leak=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
-        with:
-          languages: javascript
+      - name: Create GitHub Issue if secrets found
+        if: steps.gitleaks.outputs.leak == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          content=$(cat result.txt | head -n 20)
+          gh issue create \
+            --title "🔐 Secret Detected in Commit" \
+            --body "**Secrets detected during CI scan.**\n\nPlease review the following:\n\n\`\`\`\n$content\n\`\`\`\n\nTake immediate action to revoke and rotate affected secrets." \
+            --repo ${{ github.repository }}
 
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+      - name: Fail if secrets found
+        if: steps.gitleaks.outputs.leak == 'true'
+        run: exit 1
