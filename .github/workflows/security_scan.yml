@@ -19,5 +19,8 @@ jobs:
         with:
           project: 'demo'
           scanPath: '.'
+          format : 'HTML'
+          out : 'reports'
+
 
      
