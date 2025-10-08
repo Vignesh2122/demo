@@ -3,7 +3,6 @@ name: Secure Build, Scan, and Deploy
 on:
   push:
     branches: [ "main" ]
-  
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -14,12 +13,14 @@ permissions:
   security-events: write
   id-token: write
 
-
-
 jobs:
   build-and-scan:
     name: Build and Security Scans
     runs-on: ubuntu-latest
+    env:
+      SONAR_PROJECT_KEY: my-project   # 🔧 replace with your actual SonarQube project key
+      SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
     steps:
       - name: Checkout
@@ -34,16 +35,15 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
-      - name: Build and test (Maven)
-        run: mvn -B -U -DskipTests=True
+      - name: Build and Package (Maven)
+        run: mvn -B clean package -DskipTests=true
 
-      
+      # ---- Security Scans ----
       - name: Gitleaks Secret Scan
         uses: gitleaks/gitleaks-action@v2
         with:
           args: detect --source . --no-git --report-path gitleaks-report.json --report-format json --exit-code 1
 
-      # CodeQL
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
@@ -55,19 +55,15 @@ jobs:
         with:
           category: "/language:java"
 
-      # SonarQube
       - name: SonarQube Scan
-        env:
-          SONAR_PROJECT_KEY: ${{ env.SONAR_PROJECT_KEY }}
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        if: github.ref == 'refs/heads/main'
         run: |
           mvn -B sonar:sonar \
             -Dsonar.projectKey=${{ env.SONAR_PROJECT_KEY }} \
-            -Dsonar.host.url=$SONAR_HOST_URL \
-            -Dsonar.login=$SONAR_TOKEN
+            -Dsonar.host.url=${{ env.SONAR_HOST_URL }} \
+            -Dsonar.login=${{ env.SONAR_TOKEN }}
 
-      # Notify Teams on scan failure
+      # ---- Notify Teams if failed ----
       - name: Notify Teams on Failure
         if: failure()
         uses: jdcargile/ms-teams-notification@v1.4
@@ -77,5 +73,3 @@ jobs:
           notification-summary: "Security Scan Failed - ${{ github.repository }}"
           notification-color: dc3545
           timezone: UTC
-
-  
